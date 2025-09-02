@@ -40,3 +40,4 @@ git push -u origin main
 - Export PDF/PNG auto des graphs pour pitch deck
 ```
 
+# flexlab-dashboard
