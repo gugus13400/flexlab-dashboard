@@ -3,11 +3,11 @@ import streamlit as st
 import pandas as pd
 from utils import load_sales_fixed, stacked_bar_with_cumulative, simple_line, pie_split, SALES_PATH
 
-st.set_page_config(page_title="FlexLab — Sales", layout="wide")
+st.set_page_config(page_title="FlexLab Dashboard", layout="wide")
 
 st.markdown("""
-<h1 style='margin-bottom:0'>FlexLab — Sales</h1>
-<p style='color:#9bb7ff;margin-top:2px'>Assisted Stretching for Europe — <b>Not an AI startup</b></p>
+<h1 style='margin-bottom:0'>FlexLab Dashboard</h1>
+<p style='color:#9bb7ff;margin-top:2px'>Ventes, croissance et traction client — <b>Not an AI startup</b></p>
 """, unsafe_allow_html=True)
 
 colA, colB = st.columns([3,1])
@@ -48,7 +48,7 @@ k3.metric("Découverte (qty)", int(by_group.get("qty").get("Découverte", 0)))
 k4.metric("Packs (qty)", int(by_group.get("qty").get("Packs", 0)))
 k5.metric("Abonnement 4×50’ (qty)", int(by_group.get("qty").get("Abonnement 4×50’", 0)))
 
-# Journalière empilée + CA cumulatif
+# Journalière empilée + CA cumulatif (avec période estivale grisée)
 daily = df.groupby([pd.Grouper(key="Date", freq="D"), "Groupe"]).agg(
     quantite=("Quantité","sum"),
     ventes=("Montant total","sum")
@@ -58,7 +58,7 @@ rev = df.groupby(pd.Grouper(key="Date", freq="D"))["Montant total"].sum().reset_
 rev["cumul"] = rev["Montant total"].cumsum()
 
 st.subheader("Ventes quotidiennes par service (stacked) + CA cumulatif")
-fig1 = stacked_bar_with_cumulative(daily_pivot, rev, "Quantités quotidiennes + CA cumulatif")
+fig1 = stacked_bar_with_cumulative(daily_pivot, rev, "Quantités quotidiennes + CA cumulatif (été grisé)")
 st.pyplot(fig1, use_container_width=True)
 
 # Hebdo
@@ -68,7 +68,7 @@ weekly = df.groupby([pd.Grouper(key="Date", freq="W-MON"), "Groupe"]).agg(
 weekly_pivot = weekly.pivot(index="Date", columns="Groupe", values="ventes").fillna(0)
 
 st.subheader("Ventes hebdomadaires par type (tendance)")
-fig2 = simple_line(weekly_pivot, "Ventes hebdomadaires par type", "Ventes (€)")
+fig2 = simple_line(weekly_pivot, "Ventes hebdomadaires par type (été grisé)", "Ventes (€)")
 st.pyplot(fig2, use_container_width=True)
 
 # Pie

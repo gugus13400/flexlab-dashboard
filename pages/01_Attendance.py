@@ -1,6 +1,6 @@
 # pages/01_Attendance.py
 import streamlit as st
-from utils import load_attendance_fixed, bar_by_hour, ATT_PATH
+from utils import load_attendance_fixed, heatmap_attendance, top_slots, ATT_PATH
 
 st.set_page_config(page_title="FlexLab — Attendance", layout="wide")
 
@@ -26,12 +26,12 @@ except Exception as e:
     st.error(f"Erreur chargement présence : {e}")
     st.stop()
 
-st.subheader("Sessions par créneau horaire")
-fig_a = bar_by_hour(att, "Nombre total de sessions", "Sessions par créneau", "Nombre de sessions")
-st.pyplot(fig_a, use_container_width=True)
+st.subheader("Heatmap présences — Jour × Heure")
+fig_hm = heatmap_attendance(att, metric="Nombre total de sessions")
+st.pyplot(fig_hm, use_container_width=True)
 
-st.subheader("Clients uniques par créneau horaire")
-fig_b = bar_by_hour(att, "Clients uniques", "Clients uniques par créneau", "Clients uniques")
-st.pyplot(fig_b, use_container_width=True)
+st.subheader("Top 5 créneaux — Nombre de sessions")
+fig_top = top_slots(att, metric="Nombre total de sessions", topn=5)
+st.pyplot(fig_top, use_container_width=True)
 
-st.caption("💡 Utilisez ces graphes pour renforcer les créneaux forts et remplir les créneaux faibles (offres, contenus, B2B).")
+st.caption("💡 Identifiez les heures à forte demande (staffing) et les heures à stimuler (offres, partenariats).")
