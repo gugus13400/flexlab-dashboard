@@ -1,63 +1,65 @@
-
+# utils.py
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-import mplcyberpunk  # style & glow
+import mplcyberpunk  # pip install mplcyberpunk
 
 PRIMARY = "#0f6fff"
 
-# ---------- Data loaders ----------
-def load_sales(file):
-    """Load 'Sales by Service' Excel and normalize columns + grouping."""
-    xls = pd.read_excel(file, sheet_name=None)
-    # Heuristic to find the right sheet
+# --------------------
+# FILE PATHS (fixed)
+# --------------------
+SALES_PATH = os.path.join("data", "sales.xlsx")
+ATT_PATH   = os.path.join("data", "attendance.xlsx")
+
+# --------------------
+# LOADERS
+# --------------------
+def load_sales_fixed():
+    """Charge data/sales.xlsx (Mindbody 'Sales by Service') et normalise."""
+    if not os.path.exists(SALES_PATH):
+        raise FileNotFoundError("Fichier ventes introuvable : data/sales.xlsx")
+
+    xls = pd.read_excel(SALES_PATH, sheet_name=None)
+    # Heuristique feuille
     sheet = None
     for k in xls.keys():
         lk = k.lower()
         if "service" in lk or "vente" in lk:
-            sheet = k
-            break
+            sheet = k; break
     if sheet is None:
         sheet = list(xls.keys())[0]
     df = xls[sheet].copy()
 
-    # Normalize columns
-    if "Date d'achat" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date d'achat"], errors="coerce")
-    elif "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="cocoerce")
-    else:
-        df["Date"] = pd.NaT
+    # Normalisation colonnes principales
+    # Date
+    date_cols = ["Date d'achat", "Date", "Date de vente", "Date commande", "Sale Date"]
+    _ensure_renamed(df, date_cols, "Date")
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-    # Standardize naming
-    if "Nom" not in df.columns:
-        # try to infer the service name column
-        for c in df.columns:
-            if "Nom" in c or "Service" in c or "Name" in c:
-                df.rename(columns={c:"Nom"}, inplace=True)
-                break
-    if "Quantité" not in df.columns:
-        # try to infer quantity
-        for c in df.columns:
-            if "Quant" in c or "Qty" in c:
-                df.rename(columns={c:"Quantité"}, inplace=True)
-                break
-    if "Montant total" not in df.columns:
-        for c in df.columns:
-            if "Montant" in c or "Total" in c or "Amount" in c:
-                df.rename(columns={c:"Montant total"}, inplace=True)
-                break
-
+    # Nom du service
+    name_cols = ["Nom", "Service", "Service Name", "Nom du service"]
+    _ensure_renamed(df, name_cols, "Nom")
     df["Nom"] = df["Nom"].astype(str)
 
+    # Quantité
+    qty_cols = ["Quantité", "Qty", "Quantity", "Nombre"]
+    _ensure_renamed(df, qty_cols, "Quantité")
+
+    # Montant total
+    amt_cols = ["Montant total", "Montant", "Total", "Amount", "CA"]
+    _ensure_renamed(df, amt_cols, "Montant total")
+
+    # Regroupement métier
     def group_service(n):
         x = str(n).lower()
         if "découverte" in x:
             return "Découverte"
         if "pack" in x or "recharge" in x:
             return "Packs"
-        if "4 x 50" in x:
+        if "4 x 50" in x or "4x50" in x:
             return "Abonnement 4×50’"
         return "Unitaire"
 
@@ -65,149 +67,140 @@ def load_sales(file):
     return df
 
 
-def load_attendance(file):
-    """Load 'Attendance Analysis' Excel and normalize time columns."""
-    xls = pd.read_excel(file, sheet_name=None)
-    # Heuristic to find attendance sheet
+def load_attendance_fixed():
+    """Charge data/attendance.xlsx et normalise (créneaux + métriques)."""
+    if not os.path.exists(ATT_PATH):
+        raise FileNotFoundError("Fichier présence introuvable : data/attendance.xlsx")
+
+    xls = pd.read_excel(ATT_PATH, sheet_name=None)
+    # Heuristique feuille
     sheet = None
     for k in xls.keys():
         lk = k.lower()
         if "présence" in lk or "presence" in lk or "attendance" in lk:
-            sheet = k
-            break
+            sheet = k; break
     if sheet is None:
         sheet = list(xls.keys())[0]
     df = xls[sheet].copy()
 
-    # Find time columns
-    time_col = None
-    for c in df.columns:
-        if "Heure" in c or "Time" in c:
-            time_col = c
-            break
-    if time_col is not None:
-        df["HeureDT"] = pd.to_datetime(df[time_col], errors="coerce")
+    # Heure créneau (on accepte différents intitulés)
+    time_cols = ["Heure du service", "Heure", "Time", "Créneau", "Slot", "Start Time"]
+    _ensure_renamed(df, time_cols, "Heure du service", must_exist=False)
+    if "Heure du service" in df.columns:
+        # si c'est une heure sur la journée :
+        df["HeureDT"] = pd.to_datetime(df["Heure du service"], errors="coerce")
+        # si c'est juste "09:00" etc., ça passe aussi
         df["heure_label"] = df["HeureDT"].dt.strftime("%H:%M")
+        # fallback si NaT partout mais texte dispo
+        if df["heure_label"].isna().all():
+            df["heure_label"] = df["Heure du service"].astype(str)
     else:
-        df["heure_label"] = ""
+        # dernier recours : si une colonne ressemble à un créneau horaire
+        for c in df.columns:
+            if any(k in c.lower() for k in ["heure", "time", "slot", "créneau"]):
+                df["heure_label"] = df[c].astype(str)
+                break
+        if "heure_label" not in df.columns:
+            df["heure_label"] = ""
 
-    # Standardize metrics if present
-    if "Nombre total de sessions" not in df.columns:
-        for c in df.columns:
-            if "sessions" in c.lower() and "total" in c.lower():
-                df.rename(columns={c:"Nombre total de sessions"}, inplace=True)
-                break
-    if "Clients uniques" not in df.columns:
-        for c in df.columns:
-            if "client" in c.lower() and "unique" in c.lower():
-                df.rename(columns={c:"Clients uniques"}, inplace=True)
-                break
+    # Sessions totales
+    ses_cols = [
+        "Nombre total de sessions", "Total Sessions", "Sessions", "Nombre de sessions",
+        "Total des sessions"
+    ]
+    _ensure_renamed(df, ses_cols, "Nombre total de sessions", must_exist=False)
+
+    # Clients uniques
+    uniq_cols = ["Clients uniques", "Unique Clients", "Clients", "Unique"]
+    _ensure_renamed(df, uniq_cols, "Clients uniques", must_exist=False)
 
     return df
 
+def _ensure_renamed(df, candidates, target, must_exist=True):
+    """Renomme la 1ère colonne trouvée dans candidates -> target."""
+    if target in df.columns:
+        return
+    for c in candidates:
+        if c in df.columns:
+            df.rename(columns={c: target}, inplace=True)
+            return
+    if must_exist:
+        raise KeyError(f"Colonne requise manquante : {target} (aliases acceptés : {candidates})")
 
-# ---------- Plot helpers ----------
 
-def apply_cyberpunk():
-    """Apply mplcyberpunk style to current figure."""
+# --------------------
+# PLOTS (mplcyberpunk)
+# --------------------
+def _apply_style():
     plt.style.use("cyberpunk")
 
-
-def gradient_color(primary_hex=PRIMARY, alpha=1.0):
-    """Return a vertical gradient colormap based on primary color."""
-    # Simple gradient from brighter to primary
-    return LinearSegmentedColormap.from_list(
-        "flexlab_grad", [(0.0, (0.8, 0.88, 1.0, alpha)), (1.0, _hex_to_rgba(primary_hex, alpha))], N=256
-    )
-
-
-def _hex_to_rgba(h, alpha=1.0):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i+2], 16)/255.0 for i in (0,2,4)) + (alpha,)
-
-
 def stacked_bar_with_cumulative(daily_pivot, rev_df, title):
-    """Stacked bar quantities with cumulative revenue line."""
-    apply_cyberpunk()
+    _apply_style()
     fig, ax1 = plt.subplots(figsize=(12,5))
-
-    # Stacked bars
     bottom = np.zeros(len(daily_pivot.index))
-    labels = list(daily_pivot.columns)
     palette = {
         "Découverte": "#6aa6ff",
-        "Packs": "#0f6fff",
+        "Packs": PRIMARY,
         "Abonnement 4×50’": "#0b4bcc",
         "Unitaire": "#99bbff",
     }
-    for lab in labels:
+    for lab in daily_pivot.columns:
         vals = daily_pivot[lab].values
         bars = ax1.bar(daily_pivot.index, vals, bottom=bottom, label=lab, color=palette.get(lab, "#6aa6ff"))
         bottom += vals
-        # annotate stacked segments (only if height not too small)
         for b, v in zip(bars, vals):
             if v >= 1:
                 ax1.text(b.get_x()+b.get_width()/2, b.get_y()+b.get_height()/2, f"{int(v)}",
                          ha="center", va="center", fontsize=7, color="white")
-    ax1.set_ylabel("Quantité vendue / jour")
+    ax1.set_ylabel("Quantité / jour")
 
-    # Cumulative revenue line
     ax2 = ax1.twinx()
     ax2.plot(rev_df["Date"], rev_df["cumul"], linewidth=2.5, marker="o", color="#ffffff")
     ax2.set_ylabel("CA cumulatif (€)")
 
     mplcyberpunk.add_glow_effects(ax1)
     mplcyberpunk.add_glow_effects(ax2)
-
     ax1.set_title(title)
     ax1.legend(loc="upper left")
     fig.tight_layout()
     return fig
 
-
 def simple_line(df_indexed, title, ylabel):
-    """Simple cyberpunk line plot for weekly revenue by group."""
-    apply_cyberpunk()
+    _apply_style()
     fig, ax = plt.subplots(figsize=(12,5))
     for col in df_indexed.columns:
         ax.plot(df_indexed.index, df_indexed[col], marker="o", linewidth=2, label=col)
     mplcyberpunk.add_glow_effects(ax)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    ax.legend()
+    ax.set_title(title); ax.set_ylabel(ylabel); ax.legend()
     fig.tight_layout()
     return fig
-
 
 def pie_split(series, title):
-    """Pie chart for revenue split."""
-    apply_cyberpunk()
+    _apply_style()
     fig, ax = plt.subplots(figsize=(6,6))
-    labels = list(series.index)
-    wedges, texts, autotexts = ax.pie(series.values, labels=labels, autopct="%1.1f%%")
-    for t in autotexts:
-        t.set_color("white")
-    ax.set_title(title)
-    fig.tight_layout()
+    wedges, texts, autotexts = ax.pie(series.values, labels=series.index, autopct="%1.1f%%")
+    for t in autotexts: t.set_color("white")
+    ax.set_title(title); fig.tight_layout()
     return fig
 
-
 def bar_by_hour(att_df, col_name, title, ylabel):
-    """Bar chart for attendance by hour label."""
-    apply_cyberpunk()
+    _apply_style()
     fig, ax = plt.subplots(figsize=(12,5))
-    if "heure_label" not in att_df.columns or col_name not in att_df.columns:
-        ax.text(0.5, 0.5, "Colonnes manquantes dans le fichier de présence.", ha="center", va="center")
-        return fig
+    if "heure_label" not in att_df.columns:
+        ax.text(0.5, 0.5, "Impossible d'identifier les créneaux horaires (heure_label manquante).",
+                ha="center", va="center"); return fig
+    if col_name not in att_df.columns:
+        ax.text(0.5, 0.5, f"Colonne '{col_name}' absente dans le fichier.",
+                ha="center", va="center"); return fig
+
     hours = att_df["heure_label"]
     vals = att_df[col_name].fillna(0).values
-    bars = ax.bar(hours, vals, color="#0f6fff")
+    bars = ax.bar(hours, vals, color=PRIMARY)
     for b, v in zip(bars, vals):
         if v > 0:
             ax.text(b.get_x()+b.get_width()/2, v+0.1, f"{int(v)}", ha="center", va="bottom", fontsize=8, color="white")
+
     mplcyberpunk.add_glow_effects(ax)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    plt.xticks(rotation=45)
-    fig.tight_layout()
+    ax.set_title(title); ax.set_ylabel(ylabel)
+    plt.xticks(rotation=45); fig.tight_layout()
     return fig
