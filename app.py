@@ -1,15 +1,21 @@
 # app.py
 import streamlit as st
 import pandas as pd
-from utils import load_sales_fixed, stacked_bar_with_cumulative, simple_line, pie_split, SALES_PATH
+from utils import (
+    SALES_PATH, load_sales_fixed, styled_title, inject_background,
+    kpi_row, stacked_bar_with_cumulative, simple_line_growth,
+    weekly_packs_vs_clients, arpu_line, share_area, pie_split,
+    warn_if_missing_cols
+)
 
 st.set_page_config(page_title="FlexLab Dashboard", layout="wide")
 
-st.markdown("""
-<h1 style='margin-bottom:0'>FlexLab Dashboard</h1>
-<p style='color:#9bb7ff;margin-top:2px'>Ventes, croissance et traction client — <b>Not an AI startup</b></p>
-""", unsafe_allow_html=True)
+# Branding (background + logo if present)
+inject_background()         # uses assets/bg.jpg if available
+styled_title(logo_path="assets/logo.png", title="FlexLab Dashboard",
+             subtitle="Ventes, croissance et traction client — <b>Not an AI startup</b>")
 
+# Info + refresh
 colA, colB = st.columns([3,1])
 with colA:
     st.info(f"📄 Fichier ventes chargé automatiquement : <code>{SALES_PATH}</code>", icon="ℹ️")
@@ -21,13 +27,14 @@ with colB:
 def _load_sales():
     return load_sales_fixed()
 
+# Load data
 try:
     df = _load_sales()
 except Exception as e:
     st.error(f"Erreur chargement ventes : {e}")
     st.stop()
 
-# Filtres période
+# Date filters
 c1, c2 = st.columns(2)
 date_min = c1.date_input("Date de début", value=None)
 date_max = c2.date_input("Date de fin", value=None)
@@ -36,42 +43,42 @@ if date_min:
 if date_max:
     df = df[df["Date"] <= pd.to_datetime(date_max)]
 
-# KPIs
-total_rev = float(df["Montant total"].sum())
-total_qty = int(df["Quantité"].sum())
-by_group = df.groupby("Groupe").agg(rev=("Montant total","sum"), qty=("Quantité","sum"))
+# ---------- KPI CARDS ----------
+kpis = kpi_row(df)  # returns dict
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1.metric("CA total (€)", kpis["ca_total_fmt"])
+c2.metric("Séances totales", kpis["qty_total_fmt"])
+c3.metric("Clients uniques (approx.)", kpis["clients_uniques_fmt"], help=kpis["clients_help"])
+c4.metric("Packs vendus (sem. courante)", kpis["packs_week_fmt"])
+c5.metric("Taux Découverte → Pack", kpis["conv_discovery_to_pack_fmt"], help=kpis["conv_help"])
+c6.metric("ARPU (€ / client)", kpis["arpu_fmt"])
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("CA total (€)", f"{total_rev:,.0f}".replace(",", " "))
-k2.metric("Séances totales", f"{total_qty:,}".replace(",", " "))
-k3.metric("Découverte (qty)", int(by_group.get("qty").get("Découverte", 0)))
-k4.metric("Packs (qty)", int(by_group.get("qty").get("Packs", 0)))
-k5.metric("Abonnement 4×50’ (qty)", int(by_group.get("qty").get("Abonnement 4×50’", 0)))
-
-# Journalière empilée + CA cumulatif (avec période estivale grisée)
-daily = df.groupby([pd.Grouper(key="Date", freq="D"), "Groupe"]).agg(
-    quantite=("Quantité","sum"),
-    ventes=("Montant total","sum")
-).reset_index()
-daily_pivot = daily.pivot(index="Date", columns="Groupe", values="quantite").fillna(0)
-rev = df.groupby(pd.Grouper(key="Date", freq="D"))["Montant total"].sum().reset_index()
-rev["cumul"] = rev["Montant total"].cumsum()
-
+# ---------- CHARTS (Sales) ----------
 st.subheader("Ventes quotidiennes par service (stacked) + CA cumulatif")
-fig1 = stacked_bar_with_cumulative(daily_pivot, rev, "Quantités quotidiennes + CA cumulatif (été grisé)")
+fig1 = stacked_bar_with_cumulative(df, title="Quantités quotidiennes + CA cumulatif (été grisé)")
 st.pyplot(fig1, use_container_width=True)
 
-# Hebdo
-weekly = df.groupby([pd.Grouper(key="Date", freq="W-MON"), "Groupe"]).agg(
-    ventes=("Montant total","sum")
-).reset_index()
-weekly_pivot = weekly.pivot(index="Date", columns="Groupe", values="ventes").fillna(0)
-
-st.subheader("Ventes hebdomadaires par type (tendance)")
-fig2 = simple_line(weekly_pivot, "Ventes hebdomadaires par type (été grisé)", "Ventes (€)")
+st.subheader("CA hebdomadaire (variation semaine / semaine)")
+fig2 = simple_line_growth(df, title="CA hebdomadaire et croissance (%)")
 st.pyplot(fig2, use_container_width=True)
 
-# Pie
-st.subheader("Répartition du CA par type de service")
-fig3 = pie_split(df.groupby("Groupe")["Montant total"].sum(), "Répartition du CA")
-st.pyplot(fig3)
+st.subheader("Packs vendus vs Clients uniques (hebdomadaire)")
+fig3 = weekly_packs_vs_clients(df, title="Packs vs Clients uniques — et % conversion hebdo")
+st.pyplot(fig3, use_container_width=True)
+
+st.subheader("ARPU (CA / client) — hebdomadaire & cumul")
+fig4 = arpu_line(df, title="ARPU hebdomadaire (et ligne de tendance)")
+st.pyplot(fig4, use_container_width=True)
+
+colA, colB = st.columns([2,1])
+with colA:
+    st.subheader("Part des revenus par type (aire empilée)")
+    fig5 = share_area(df, title="Répartition du CA dans le temps")
+    st.pyplot(fig5, use_container_width=True)
+with colB:
+    st.subheader("Répartition cumulée du CA")
+    fig6 = pie_split(df.groupby("Groupe")["Montant total"].sum(), "CA total par type")
+    st.pyplot(fig6, use_container_width=True)
+
+# Warn if missing columns for deeper metrics
+warn_if_missing_cols(df)
