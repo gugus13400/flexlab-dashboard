@@ -2,9 +2,6 @@
 import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import mplcyberpunk  # pip install mplcyberpunk
-from matplotlib.colors import LinearSegmentedColormap
 from datetime import datetime
 
 PRIMARY = "#0f6fff"
@@ -17,10 +14,44 @@ SALES_PATH = os.path.join("data", "sales.xlsx")
 ATT_PATH   = os.path.join("data", "attendance.xlsx")
 
 # --------------------
+# LAZY MATPLOTLIB IMPORTS (avoid crashing on module import)
+# --------------------
+def _mpl():
+    """Import matplotlib & friends lazily; force headless backend."""
+    import matplotlib
+    matplotlib.use("Agg")  # headless for Streamlit Cloud
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LinearSegmentedColormap
+    import mplcyberpunk
+    return matplotlib, plt, LinearSegmentedColormap, mplcyberpunk
+
+def _brand_cmap():
+    _, _, LinearSegmentedColormap, _ = _mpl()
+    return LinearSegmentedColormap.from_list(
+        "flexlab_cmap",
+        [(0.85, 0.92, 1.0, 1.0), _hex_to_rgba(PRIMARY, 1.0)],
+        N=256
+    )
+
+def _hex_to_rgba(h, alpha=1.0):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i+2], 16)/255.0 for i in (0,2,4)) + (alpha,)
+
+def _apply_style(plt, mplcyberpunk):
+    plt.style.use("cyberpunk")
+
+def shade_closed_period(ax, start="2025-08-02", end="2025-08-24", label="Studio fermé (été)"):
+    import pandas as pd
+    try:
+        s = pd.to_datetime(start); e = pd.to_datetime(end)
+        ax.axvspan(s, e, color="grey", alpha=0.25, label=label)
+    except Exception:
+        pass
+
+# --------------------
 # HELPERS
 # --------------------
 def _ensure_renamed(df, candidates, target, must_exist=True):
-    """Rename first matching candidate column to target name."""
     if target in df.columns:
         return
     for c in candidates:
@@ -29,25 +60,6 @@ def _ensure_renamed(df, candidates, target, must_exist=True):
             return
     if must_exist:
         raise KeyError(f"Required column missing: {target} (accepted: {candidates})")
-
-def _brand_cmap():
-    # gradient from very light to brand blue
-    return LinearSegmentedColormap.from_list("flexlab_cmap",
-        [(0.85, 0.92, 1.0, 1.0), _hex_to_rgba(PRIMARY, 1.0)], N=256)
-
-def _hex_to_rgba(h, alpha=1.0):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i+2], 16)/255.0 for i in (0,2,4)) + (alpha,)
-
-def _apply_style():
-    plt.style.use("cyberpunk")
-
-def shade_closed_period(ax, start="2025-08-02", end="2025-08-24", label="Studio fermé (été)"):
-    try:
-        s = pd.to_datetime(start); e = pd.to_datetime(end)
-        ax.axvspan(s, e, color="grey", alpha=0.25, label=label)
-    except Exception:
-        pass
 
 # --------------------
 # LOADERS
@@ -86,7 +98,6 @@ def load_sales_fixed():
             return "Packs"
         if "4 x 50" in x or "4x50" in x:
             return "Abonnement 4×50’"
-        # everything else in one bucket to stay readable
         return "Unitaire (autres)"
 
     df["Groupe"] = df["Nom"].apply(group_service)
@@ -112,15 +123,13 @@ def load_attendance_fixed():
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df["Jour"] = df["Date"].dt.day_name()
-        # French ordering
         mapping = {
             "Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi","Thursday":"Jeudi",
             "Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"
         }
         df["JourFR"] = df["Jour"].map(mapping)
         df["JourFR"] = pd.Categorical(df["JourFR"],
-                        categories=["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"],
-                        ordered=True)
+            categories=["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"], ordered=True)
 
     # hour / slot
     _ensure_renamed(df, ["Heure du service","Heure","Time","Créneau","Slot","Start Time"], "Heure du service", must_exist=False)
@@ -140,10 +149,17 @@ def load_attendance_fixed():
     return df
 
 # --------------------
-# PLOTS
+# PLOTS (lazy import inside)
 # --------------------
 def stacked_bar_with_cumulative(daily_pivot, rev_df, title, shade_august=True):
-    _apply_style()
+    _, plt, _, mplcyberpunk = _mpl()
+    def _style():
+        _apply_style(plt, mplcyberpunk)
+
+    def _apply_style(plt, mplcyberpunk):
+        plt.style.use("cyberpunk")
+
+    _style()
     fig, ax1 = plt.subplots(figsize=(12,5))
 
     bottom = np.zeros(len(daily_pivot.index))
@@ -164,7 +180,6 @@ def stacked_bar_with_cumulative(daily_pivot, rev_df, title, shade_august=True):
 
     ax1.set_ylabel("Quantité / jour")
 
-    # cumulative revenue line
     ax2 = ax1.twinx()
     ax2.plot(rev_df["Date"], rev_df["cumul"], linewidth=2.2, marker="o", color="#ffffff")
     ax2.set_ylabel("CA cumulatif (€)")
@@ -180,7 +195,8 @@ def stacked_bar_with_cumulative(daily_pivot, rev_df, title, shade_august=True):
     return fig
 
 def simple_line(df_indexed, title, ylabel, shade_august=True):
-    _apply_style()
+    _, plt, _, mplcyberpunk = _mpl()
+    plt.style.use("cyberpunk")
     fig, ax = plt.subplots(figsize=(12,5))
     for col in df_indexed.columns:
         ax.plot(df_indexed.index, df_indexed[col], marker="o", linewidth=2, label=col)
@@ -192,7 +208,8 @@ def simple_line(df_indexed, title, ylabel, shade_august=True):
     return fig
 
 def pie_split(series, title):
-    _apply_style()
+    _, plt, _, _ = _mpl()
+    plt.style.use("cyberpunk")
     fig, ax = plt.subplots(figsize=(6,6))
     wedges, texts, autotexts = ax.pie(series.values, labels=series.index, autopct="%1.1f%%")
     for t in autotexts: t.set_color("white")
@@ -200,23 +217,24 @@ def pie_split(series, title):
     return fig
 
 def heatmap_attendance(att_df, metric="Nombre total de sessions"):
-    """Heatmap Jour (lignes) × Heure (colonnes)."""
-    _apply_style()
+    _, plt, LinearSegmentedColormap, _ = _mpl()
+    plt.style.use("cyberpunk")
+    import numpy as np
+
     fig, ax = plt.subplots(figsize=(12,6))
 
     if "JourFR" not in att_df.columns:
-        ax.text(0.5,0.5,"Pas de colonne date/jour trouvée pour construire la heatmap.\n"
+        ax.text(0.5,0.5,"Pas de colonne date/jour pour construire la heatmap.\n"
                         "Ajoutez 'Date du service' dans attendance.xlsx.", ha="center", va="center")
         return fig
     if "HeureHM" not in att_df.columns:
-        ax.text(0.5,0.5,"Pas de colonne heure trouvée (Heure du service / Time).", ha="center", va="center")
+        ax.text(0.5,0.5,"Pas de colonne heure (Heure du service / Time).", ha="center", va="center")
         return fig
     if metric not in att_df.columns:
         ax.text(0.5,0.5,f"Colonne '{metric}' introuvable.", ha="center", va="center")
         return fig
 
     P = att_df.pivot_table(index="JourFR", columns="HeureHM", values=metric, aggfunc="sum").fillna(0)
-    # order hours
     try:
         cols_sorted = sorted(P.columns, key=lambda x: (int(x.split(':')[0]), int(x.split(':')[1])) if ':' in x else x)
         P = P[cols_sorted]
@@ -237,8 +255,8 @@ def heatmap_attendance(att_df, metric="Nombre total de sessions"):
     return fig
 
 def top_slots(att_df, metric="Nombre total de sessions", topn=5):
-    """Top N créneaux horaires sur la période."""
-    _apply_style()
+    _, plt, _, mplcyberpunk = _mpl()
+    plt.style.use("cyberpunk")
     fig, ax = plt.subplots(figsize=(10,5))
     if "HeureHM" not in att_df.columns or metric not in att_df.columns:
         ax.text(0.5,0.5,"Colonnes nécessaires manquantes (HeureHM / metric).", ha="center", va="center")
